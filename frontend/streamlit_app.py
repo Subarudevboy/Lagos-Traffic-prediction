@@ -9,8 +9,17 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 
-default_backend_url = os.getenv("BACKEND_URL", "backend-api-production-0277.up.railway.app")
-API_BASE = st.sidebar.text_input("Backend URL", default_backend_url)
+def normalize_api_base(url: str) -> str:
+    cleaned = (url or "").strip().rstrip("/")
+    if not cleaned:
+        return "http://127.0.0.1:8000"
+    if not cleaned.startswith(("http://", "https://")):
+        cleaned = f"https://{cleaned}"
+    return cleaned
+
+
+default_backend_url = normalize_api_base(os.getenv("BACKEND_URL", "https://backend-api-production-0277.up.railway.app"))
+API_BASE = normalize_api_base(st.sidebar.text_input("Backend URL", default_backend_url))
 
 st.set_page_config(page_title="Lagos Traffic Platform", layout="wide")
 st.title("Lagos Real-Time Traffic Simulation & Predictive Congestion Platform")

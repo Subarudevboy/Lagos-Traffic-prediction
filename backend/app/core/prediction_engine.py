@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,14 +28,16 @@ FEATURE_COLUMNS = [
 
 class PredictionEngine:
     def __init__(self) -> None:
-        self.rows: list[dict[str, Any]] = []
+        self.max_rows = 20000
+        self.max_segment_history = 720
+        self.rows = deque(maxlen=self.max_rows)
         self.model = None
         self.model_name = "untrained"
         self.metrics: dict[str, float] = {}
         self.residual_std = 0.07
         self.last_retrained_at: datetime | None = None
         self.retrain_interval_ticks = 900
-        self.segment_series = defaultdict(list)
+        self.segment_series = defaultdict(lambda: deque(maxlen=self.max_segment_history))
 
     def add_observation(self, features: dict[str, Any], target: float, tick: int) -> None:
         row = {k: features[k] for k in FEATURE_COLUMNS if k in features}
@@ -48,7 +50,7 @@ class PredictionEngine:
     def _build_dataset(self) -> pd.DataFrame:
         if not self.rows:
             return pd.DataFrame(columns=[*FEATURE_COLUMNS, "target", "tick", "segment_id"])
-        return pd.DataFrame(self.rows)
+        return pd.DataFrame(list(self.rows))
 
     def maybe_retrain(self, tick: int) -> None:
         if len(self.rows) < 500:
@@ -141,4 +143,7 @@ class PredictionEngine:
         return pred, lower, upper
 
     def get_segment_history(self, segment_id: int, limit: int = 120) -> list[float]:
-        return self.segment_series.get(segment_id, [])[-limit:]
+        history = self.segment_series.get(segment_id)
+        if history is None:
+            return []
+        return list(history)[-limit:]

@@ -1,0 +1,87 @@
+# Lagos Real-Time Traffic Simulation & Predictive Congestion Platform
+
+This project implements a modular MVP for real-time synthetic traffic simulation, congestion forecasting, dynamic routing, and live dashboard monitoring for Lagos.
+
+## Architecture
+
+Road Network (Synthetic OSM-style)
+-> Simulation Engine (1s ticks)
+-> Feature Engineering Layer
+-> Prediction Engine
+-> Redis cache
+-> FastAPI
+-> Streamlit dashboard
+
+PostgreSQL + PostGIS schema is included via SQLAlchemy models and Docker service.
+
+## Implemented Scope
+
+- Synthetic ingestion for **1200 segments** and **120,000 vehicles** defaults
+- Real-time congestion updates every second
+- Feature generation (lags, rolling stats, rush hour, incident flag)
+- Forecasting (baselines + linear/rf/gradient boosting)
+- Dynamic route analysis with congestion-aware travel-time weighting
+- Live heatmap and predictive panel in Streamlit
+- API endpoints:
+  - `GET /live/segments`
+  - `GET /live/heatmap`
+  - `POST /route/analyze`
+  - `POST /route/pause`
+  - `POST /route/scenario`
+  - `POST /route/incident`
+  - `GET /prediction/segment/{id}`
+  - `GET /prediction/metrics`
+
+## Project Structure
+
+- `backend/app/main.py`
+- `backend/app/api/`
+- `backend/app/core/`
+- `backend/app/db/`
+- `backend/app/services/`
+- `backend/app/ingestion/`
+- `backend/experiments/modeling_notebook.ipynb`
+- `frontend/streamlit_app.py`
+
+## Run with Docker
+
+```bash
+docker compose up --build
+```
+
+- API: http://localhost:8000
+- API docs: http://localhost:8000/docs
+- Dashboard: http://localhost:8501
+
+## Local Development
+
+Backend:
+
+```bash
+cd backend
+..\.venv\Scripts\python.exe -m pip install -r requirements.txt
+set PYTHONPATH=%cd%
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+```
+
+Frontend:
+
+```bash
+cd frontend
+..\.venv\Scripts\python.exe -m pip install -r requirements.txt
+..\.venv\Scripts\python.exe -m streamlit run streamlit_app.py
+```
+
+## Tests
+
+```bash
+cd backend
+set PYTHONPATH=%cd%
+..\.venv\Scripts\python.exe -m pytest
+```
+
+## Notes
+
+- The current implementation is synthetic and does not ingest live traffic feeds.
+- Redis and Postgres are optional for development; cache falls back to in-memory when Redis is unavailable.
+- Model retraining is periodic based on simulation ticks.

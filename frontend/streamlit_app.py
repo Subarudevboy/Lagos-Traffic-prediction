@@ -9,7 +9,7 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 
-default_backend_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+default_backend_url = os.getenv("BACKEND_URL", "backend-api-production-0277.up.railway.app")
 API_BASE = st.sidebar.text_input("Backend URL", default_backend_url)
 
 st.set_page_config(page_title="Lagos Traffic Platform", layout="wide")

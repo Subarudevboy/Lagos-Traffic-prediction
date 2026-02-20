@@ -1,6 +1,34 @@
 # Lagos Real-Time Traffic Simulation & Predictive Congestion Platform
 
+![Python](https://img.shields.io/badge/Python-3.14-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688)
+![Streamlit](https://img.shields.io/badge/Streamlit-Frontend-FF4B4B)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)
+![Status](https://img.shields.io/badge/Status-MVP-success)
+
 This project implements a modular MVP for real-time synthetic traffic simulation, congestion forecasting, dynamic routing, and live dashboard monitoring for Lagos.
+
+## Quick Start
+
+1) Start backend
+
+```bash
+cd backend
+set PYTHONPATH=%cd%
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+2) Start frontend (new terminal)
+
+```bash
+cd frontend
+..\.venv\Scripts\python.exe -m streamlit run streamlit_app.py --server.address 127.0.0.1 --server.port 8501
+```
+
+3) Open dashboard
+
+- http://127.0.0.1:8501
+- In sidebar, ensure `Backend URL` is `http://127.0.0.1:8000`
 
 ## Architecture
 

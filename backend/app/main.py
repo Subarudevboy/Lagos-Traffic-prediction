@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -16,10 +17,14 @@ from app.services.state_cache import StateCache
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    num_segments = int(os.getenv("SIM_NUM_SEGMENTS", "1200"))
+    total_vehicles = int(os.getenv("SIM_TOTAL_VEHICLES", "120000"))
+    tick_interval_seconds = int(os.getenv("SIM_TICK_INTERVAL_SECONDS", "1"))
+
     simulation_engine = SimulationEngine(
-        num_segments=1200,
-        total_vehicles=120000,
-        tick_interval_seconds=1,
+        num_segments=num_segments,
+        total_vehicles=total_vehicles,
+        tick_interval_seconds=tick_interval_seconds,
     )
     prediction_engine = PredictionEngine()
     state_cache = StateCache()

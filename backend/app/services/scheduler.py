@@ -71,26 +71,29 @@ class SimulationScheduler:
             heatmap_rows = []
             for idx, (row, features) in enumerate(zip(live_segments, feature_rows), start=1):
                 predicted, lower, upper = self.prediction_engine.predict(features)
+                predicted_speed = max(float(row["free_flow_speed"]) * (1 - predicted), 5.0)
+                estimated_travel_time_min = (float(row["length"]) / max(float(row["avg_speed"]), 5.0)) * 60.0
+                predicted_travel_time_min = (float(row["length"]) / predicted_speed) * 60.0
                 heatmap_rows.append(
                     {
                         **row,
                         "predicted_congestion": round(predicted, 4),
                         "confidence_lower": round(lower, 4),
                         "confidence_upper": round(upper, 4),
+                        "estimated_segment_travel_time_min": round(estimated_travel_time_min, 3),
+                        "predicted_segment_travel_time_min": round(predicted_travel_time_min, 3),
                     }
                 )
                 if idx % 200 == 0:
                     await asyncio.sleep(0)
 
-            self.state_cache.set_json("live_segments", live_segments)
+            self.state_cache.set_json("live_segments", heatmap_rows)
             self.state_cache.set_json("live_heatmap", heatmap_rows)
             self.state_cache.set_json("model_metrics", self.prediction_engine.metrics)
             self.state_cache.set_json(
                 "sim_status",
                 {
-                    "tick": self.simulation_engine.tick_count,
-                    "paused": self.simulation_engine.paused,
-                    "demand_multiplier": self.simulation_engine.demand_multiplier,
+                    **self.simulation_engine.get_status(),
                     "model": self.prediction_engine.model_name,
                 },
             )

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import heapq
 import math
+from datetime import timedelta
 from typing import Any
 
+from app.core.feature_engineering import build_feature_row
 from app.core.prediction_engine import PredictionEngine
 from app.core.simulation_engine import SimulationEngine
 
@@ -59,19 +61,15 @@ class RoutingEngine:
         current_speed = max(float(state["avg_speed"]), 5.0)
 
         if mode == "predicted":
-            feature_guess = {
-                "hour": 0,
-                "day_of_week": 0,
-                "lag_1": state["congestion_index"],
-                "lag_3": state["congestion_index"],
-                "lag_6": state["congestion_index"],
-                "rolling_mean_15": state["congestion_index"],
-                "rolling_mean_60": state["congestion_index"],
-                "rolling_std_15": 0.03,
-                "capacity_ratio": state["vehicle_count"] / max(segment.capacity, 1),
-                "incident_flag": state["incident_flag"],
-                "rush_hour": 0,
-            }
+            history = list(self.simulation_engine.congestion_history[segment_id])
+            feature_guess = build_feature_row(
+                segment_id=segment_id,
+                timestamp=self.simulation_engine.current_time + timedelta(minutes=12),
+                congestion_history=history,
+                capacity=segment.capacity,
+                vehicle_count=state["vehicle_count"],
+                incident_flag=state["incident_flag"],
+            )
             predicted_congestion, _, _ = self.prediction_engine.predict(feature_guess)
             current_speed = max(segment.free_flow_speed * (1 - predicted_congestion), 5.0)
 
@@ -132,6 +130,9 @@ class RoutingEngine:
         return {
             "current_travel_time": round(current_time, 2),
             "predicted_travel_time": round(predicted_time, 2),
+            "estimated_current_travel_time_min": round(current_time, 2),
+            "predicted_travel_time_10_15_min": round(predicted_time, 2),
+            "prediction_horizon_minutes": 12,
             "route_geometry": route_geometry,
             "congestion_risk_score": round(risk, 4),
         }

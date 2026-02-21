@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, Request
 
@@ -38,6 +40,27 @@ def set_scenario(payload: ScenarioRequest, request: Request):
     return {"ok": True, "demand_multiplier": payload.multiplier}
 
 
+class SimulationControlRequest(BaseModel):
+    day_of_week: int = Field(..., ge=0, le=6)
+    time_of_day_minutes: int = Field(..., ge=0, le=1439)
+    scenario: Literal["Morning", "Midday", "Evening", "Night"]
+    speed_multiplier: float = Field(...)
+
+
+@router.post("/controls")
+def set_simulation_controls(payload: SimulationControlRequest, request: Request):
+    if payload.speed_multiplier not in {0.5, 1.0, 2.0, 5.0}:
+        raise HTTPException(status_code=422, detail="speed_multiplier must be one of 0.5, 1, 2, 5")
+
+    request.app.state.simulation_engine.set_temporal_controls(
+        day_of_week=payload.day_of_week,
+        time_of_day_minutes=payload.time_of_day_minutes,
+        scenario=payload.scenario,
+        speed_multiplier=payload.speed_multiplier,
+    )
+    return {"ok": True, "status": request.app.state.simulation_engine.get_status()}
+
+
 class IncidentRequest(BaseModel):
     segment_id: int
     severity: float = Field(..., ge=0.0, le=1.0)
@@ -63,4 +86,10 @@ class PauseRequest(BaseModel):
 @router.post("/pause")
 def pause_simulation(payload: PauseRequest, request: Request):
     request.app.state.simulation_engine.set_paused(payload.paused)
-    return {"ok": True, "paused": payload.paused}
+    return {"ok": True, "paused": payload.paused, "status": request.app.state.simulation_engine.get_status()}
+
+
+@router.post("/reset")
+def reset_simulation(request: Request):
+    request.app.state.simulation_engine.reset()
+    return {"ok": True, "status": request.app.state.simulation_engine.get_status()}

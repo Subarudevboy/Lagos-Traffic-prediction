@@ -24,6 +24,9 @@ class SimulationEngine:
 
         self.paused = False
         self.demand_multiplier = 1.0
+        self.simulation_speed_multiplier = 1.0
+        self.day_of_week = datetime.now(UTC).weekday()
+        self.scenario = "Midday"
         self.tick_count = 0
         self.current_time = datetime.now(UTC)
 
@@ -31,6 +34,43 @@ class SimulationEngine:
         self.live_state: dict[int, dict] = {}
         self.congestion_history = defaultdict(lambda: deque(maxlen=3600))
 
+        self._initialize_state()
+
+    def _set_datetime_from_controls(self) -> None:
+        current_weekday = self.current_time.weekday()
+        delta_days = (self.day_of_week - current_weekday) % 7
+        base = self.current_time + timedelta(days=delta_days)
+        self.current_time = base.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def set_temporal_controls(
+        self,
+        day_of_week: int,
+        time_of_day_minutes: int,
+        scenario: str,
+        speed_multiplier: float,
+    ) -> None:
+        self.day_of_week = max(0, min(6, int(day_of_week)))
+        minutes = max(0, min(1439, int(time_of_day_minutes)))
+        self.scenario = scenario if scenario in {"Morning", "Midday", "Evening", "Night"} else "Midday"
+        self.simulation_speed_multiplier = speed_multiplier if speed_multiplier in {0.5, 1.0, 2.0, 5.0} else 1.0
+
+        self._set_datetime_from_controls()
+        self.current_time = self.current_time.replace(
+            hour=minutes // 60,
+            minute=minutes % 60,
+            second=0,
+            microsecond=0,
+        )
+
+    def set_speed_multiplier(self, speed_multiplier: float) -> None:
+        self.simulation_speed_multiplier = speed_multiplier if speed_multiplier in {0.5, 1.0, 2.0, 5.0} else 1.0
+
+    def reset(self) -> None:
+        self.tick_count = 0
+        self.incidents.clear()
+        self.live_state.clear()
+        self.congestion_history.clear()
+        self._set_datetime_from_controls()
         self._initialize_state()
 
     def _initialize_state(self) -> None:
@@ -69,15 +109,22 @@ class SimulationEngine:
 
     def _time_of_day_demand(self, timestamp: datetime) -> float:
         hour = timestamp.hour
-        if 6 <= hour <= 10:
-            return 1.3
-        if 16 <= hour <= 20:
-            return 1.35
-        if 11 <= hour <= 15:
-            return 1.0
-        if 21 <= hour <= 23:
-            return 0.75
-        return 0.6
+        scenario_profiles = {
+            "Morning": {"base": 1.15, "peak_hours": {6, 7, 8, 9}},
+            "Midday": {"base": 1.0, "peak_hours": {11, 12, 13, 14}},
+            "Evening": {"base": 1.2, "peak_hours": {16, 17, 18, 19}},
+            "Night": {"base": 0.75, "peak_hours": {21, 22, 23, 0, 1, 2, 3, 4}},
+        }
+        profile = scenario_profiles.get(self.scenario, scenario_profiles["Midday"])
+
+        time_factor = profile["base"]
+        if hour in profile["peak_hours"]:
+            time_factor += 0.18
+        elif 0 <= hour <= 4:
+            time_factor -= 0.12
+
+        day_factor = 0.9 if self.day_of_week in {5, 6} else 1.0
+        return max(0.45, time_factor * day_factor)
 
     def _active_incident_severity(self, segment_id: int) -> float:
         details = self.incidents.get(segment_id)
@@ -90,7 +137,7 @@ class SimulationEngine:
             return self.live_state
 
         self.tick_count += 1
-        self.current_time += timedelta(seconds=self.tick_interval_seconds)
+        self.current_time += timedelta(seconds=self.tick_interval_seconds * self.simulation_speed_multiplier)
         demand_factor = self._time_of_day_demand(self.current_time) * self.demand_multiplier
 
         for segment in self.segments:
@@ -129,6 +176,18 @@ class SimulationEngine:
             self.incidents.pop(segment_id, None)
 
         return self.live_state
+
+    def get_status(self) -> dict:
+        return {
+            "tick": self.tick_count,
+            "paused": self.paused,
+            "demand_multiplier": self.demand_multiplier,
+            "day_of_week": self.day_of_week,
+            "scenario": self.scenario,
+            "simulation_speed_multiplier": self.simulation_speed_multiplier,
+            "time_of_day_minutes": self.current_time.hour * 60 + self.current_time.minute,
+            "timestamp": self.current_time.isoformat(),
+        }
 
     def get_live_segments(self) -> list[dict]:
         rows = []

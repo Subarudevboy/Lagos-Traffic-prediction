@@ -13,6 +13,26 @@ class SimulationScheduler:
         self._task = None
         self._retrain_task = None
         self._running = False
+        self._last_reset_token = None
+
+    def _sync_shared_controls(self) -> None:
+        remote = self.state_cache.get_json("sim_control_state", None)
+        if not isinstance(remote, dict):
+            return
+
+        reset_token = remote.get("reset_token")
+        if reset_token and reset_token != self._last_reset_token:
+            self.simulation_engine.reset()
+            self._last_reset_token = reset_token
+
+        self.simulation_engine.set_paused(bool(remote.get("paused", self.simulation_engine.paused)))
+        self.simulation_engine.set_demand_scenario(float(remote.get("demand_multiplier", self.simulation_engine.demand_multiplier)))
+        self.simulation_engine.set_temporal_controls(
+            day_of_week=int(remote.get("day_of_week", self.simulation_engine.day_of_week)),
+            time_of_day_minutes=int(remote.get("time_of_day_minutes", self.simulation_engine.current_time.hour * 60 + self.simulation_engine.current_time.minute)),
+            scenario=str(remote.get("scenario", self.simulation_engine.scenario)),
+            speed_multiplier=float(remote.get("simulation_speed_multiplier", self.simulation_engine.simulation_speed_multiplier)),
+        )
 
     async def start(self) -> None:
         if self._running:
@@ -38,6 +58,7 @@ class SimulationScheduler:
     async def _loop(self) -> None:
         while self._running:
             await asyncio.sleep(0)
+            self._sync_shared_controls()
             self.simulation_engine.tick()
             live_segments = self.simulation_engine.get_live_segments()
 

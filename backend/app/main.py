@@ -37,6 +37,14 @@ async def lifespan(app: FastAPI):
     app.state.routing_engine = routing_engine
     app.state.scheduler = scheduler
 
+    state_cache.set_json(
+        "sim_control_state",
+        {
+            **simulation_engine.get_status(),
+            "reset_token": None,
+        },
+    )
+
     await scheduler.start()
     yield
     await scheduler.stop()

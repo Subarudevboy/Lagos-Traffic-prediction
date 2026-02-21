@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -7,6 +8,15 @@ from fastapi import APIRouter, HTTPException, Request
 
 
 router = APIRouter(prefix="/route", tags=["routing"])
+
+
+def _merged_control_state(request: Request, updates: dict) -> dict:
+    simulation_engine = request.app.state.simulation_engine
+    state_cache = request.app.state.state_cache
+    current = state_cache.get_json("sim_control_state", simulation_engine.get_status())
+    merged = {**current, **updates}
+    state_cache.set_json("sim_control_state", merged)
+    return merged
 
 
 class Coordinate(BaseModel):
@@ -37,6 +47,7 @@ class ScenarioRequest(BaseModel):
 @router.post("/scenario")
 def set_scenario(payload: ScenarioRequest, request: Request):
     request.app.state.simulation_engine.set_demand_scenario(payload.multiplier)
+    _merged_control_state(request, {"demand_multiplier": payload.multiplier})
     return {"ok": True, "demand_multiplier": payload.multiplier}
 
 
@@ -57,6 +68,15 @@ def set_simulation_controls(payload: SimulationControlRequest, request: Request)
         time_of_day_minutes=payload.time_of_day_minutes,
         scenario=payload.scenario,
         speed_multiplier=payload.speed_multiplier,
+    )
+    _merged_control_state(
+        request,
+        {
+            "day_of_week": payload.day_of_week,
+            "time_of_day_minutes": payload.time_of_day_minutes,
+            "scenario": payload.scenario,
+            "simulation_speed_multiplier": payload.speed_multiplier,
+        },
     )
     return {"ok": True, "status": request.app.state.simulation_engine.get_status()}
 
@@ -86,10 +106,12 @@ class PauseRequest(BaseModel):
 @router.post("/pause")
 def pause_simulation(payload: PauseRequest, request: Request):
     request.app.state.simulation_engine.set_paused(payload.paused)
+    _merged_control_state(request, {"paused": payload.paused})
     return {"ok": True, "paused": payload.paused, "status": request.app.state.simulation_engine.get_status()}
 
 
 @router.post("/reset")
 def reset_simulation(request: Request):
     request.app.state.simulation_engine.reset()
+    _merged_control_state(request, {"reset_token": time.time_ns()})
     return {"ok": True, "status": request.app.state.simulation_engine.get_status()}

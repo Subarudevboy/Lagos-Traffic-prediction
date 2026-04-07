@@ -113,3 +113,21 @@ set PYTHONPATH=%cd%
 - The current implementation is synthetic and does not ingest live traffic feeds.
 - Redis and Postgres are optional for development; cache falls back to in-memory when Redis is unavailable.
 - Model retraining is periodic based on simulation ticks.
+
+## Oracle Cloud Deployment Pack
+
+Production-oriented OCI artifacts are available in the deployment pack:
+
+- Services and sizing: `deploy/oci/services-and-sizing.md`
+- Step-by-step runbook: `deploy/oci/runbook.md`
+- Environment variable matrix: `deploy/oci/env-matrix.md`
+- Rollback plan: `deploy/oci/rollback-plan.md`
+
+Supporting files:
+
+- OCI compose file: `deploy/oci/docker-compose.oci.yml`
+- Backend env template: `deploy/oci/env/backend.env.example`
+- Frontend env template: `deploy/oci/env/frontend.env.example`
+- VM bootstrap script: `deploy/oci/scripts/bootstrap_vm.sh`
+- Deploy script: `deploy/oci/scripts/deploy_stack.sh`
+- Smoke test script: `deploy/oci/scripts/smoke_test.sh`

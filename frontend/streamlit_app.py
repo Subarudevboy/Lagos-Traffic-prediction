@@ -112,7 +112,7 @@ def minutes_to_time(value: int) -> time:
 
 
 st.set_page_config(page_title="Lagos Traffic Platform", layout="wide")
-st.title("Lagos Traffic Demo (Streamlit-Only Mode)")
+st.title("Lagos Traffic Demo")
 st.caption("This demo runs simulation, prediction, and routing in-process without external backend APIs.")
 
 st_autorefresh(interval=3000, key="live_refresh")

@@ -27,8 +27,7 @@ cd frontend
 
 3) Open dashboard
 
-- http://127.0.0.1:8501
-- In sidebar, ensure `Backend URL` is `http://127.0.0.1:8000`
+-https://lagoshardo.streamlit.app/
 
 ## Streamlit-Only Demo Mode
 

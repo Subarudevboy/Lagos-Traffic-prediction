@@ -1,33 +1,107 @@
 from __future__ import annotations
 
 import os
+import sys
+import importlib
 from datetime import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pydeck as pdk
-import requests
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 
-def normalize_api_base(url: str) -> str:
-    cleaned = (url or "").strip().rstrip("/")
-    if not cleaned:
-        return "http://127.0.0.1:8000"
-    if not cleaned.startswith(("http://", "https://")):
-        cleaned = f"https://{cleaned}"
-    return cleaned
+ROOT = Path(__file__).resolve().parents[1]
+BACKEND_ROOT = ROOT / "backend"
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+build_feature_row = importlib.import_module("app.core.feature_engineering").build_feature_row
+PredictionEngine = importlib.import_module("app.core.prediction_engine").PredictionEngine
+RoutingEngine = importlib.import_module("app.core.routing_engine").RoutingEngine
+SimulationEngine = importlib.import_module("app.core.simulation_engine").SimulationEngine
 
 
-def post_json(path: str, payload: dict | None = None) -> dict | None:
-    # Wrapper for backend POST calls with consistent error handling.
-    try:
-        response = requests.post(f"{API_BASE}{path}", json=payload or {}, timeout=12)
-        response.raise_for_status()
-        return response.json()
-    except Exception as exc:
-        st.error(f"Failed to post {path}: {exc}")
-        return None
+def get_runtime_state() -> dict:
+    # Keep simulation and model state alive per Streamlit user session.
+    if "runtime" in st.session_state:
+        return st.session_state["runtime"]
+
+    sim_segments = int(os.getenv("SIM_NUM_SEGMENTS", "700"))
+    sim_vehicles = int(os.getenv("SIM_TOTAL_VEHICLES", "70000"))
+    sim_tick = int(os.getenv("SIM_TICK_INTERVAL_SECONDS", "1"))
+
+    simulation_engine = SimulationEngine(
+        num_segments=sim_segments,
+        total_vehicles=sim_vehicles,
+        tick_interval_seconds=sim_tick,
+    )
+    prediction_engine = PredictionEngine()
+    routing_engine = RoutingEngine(simulation_engine, prediction_engine)
+
+    st.session_state["runtime"] = {
+        "simulation_engine": simulation_engine,
+        "prediction_engine": prediction_engine,
+        "routing_engine": routing_engine,
+        "heatmap_rows": [],
+        "model_metrics": {},
+    }
+    return st.session_state["runtime"]
+
+
+def run_step(runtime: dict) -> tuple[list[dict], dict, dict]:
+    simulation_engine = runtime["simulation_engine"]
+    prediction_engine = runtime["prediction_engine"]
+
+    simulation_engine.tick()
+    live_segments = simulation_engine.get_live_segments()
+
+    heatmap_rows = []
+    for row in live_segments:
+        history = list(simulation_engine.congestion_history[row["segment_id"]])
+        features = build_feature_row(
+            segment_id=row["segment_id"],
+            timestamp=simulation_engine.current_time,
+            congestion_history=history,
+            capacity=row["capacity"],
+            vehicle_count=row["vehicle_count"],
+            incident_flag=row["incident_flag"],
+        )
+        prediction_engine.add_observation(
+            features=features,
+            target=row["congestion_index"],
+            tick=simulation_engine.tick_count,
+        )
+
+        if len(prediction_engine.rows) >= 500 and simulation_engine.tick_count % prediction_engine.retrain_interval_ticks == 0:
+            prediction_engine.train()
+
+        predicted, lower, upper = prediction_engine.predict(features)
+        predicted_speed = max(float(row["free_flow_speed"]) * (1 - predicted), 5.0)
+        estimated_travel_time_min = (float(row["length"]) / max(float(row["avg_speed"]), 5.0)) * 60.0
+        predicted_travel_time_min = (float(row["length"]) / predicted_speed) * 60.0
+
+        heatmap_rows.append(
+            {
+                **row,
+                "predicted_congestion": round(predicted, 4),
+                "confidence_lower": round(lower, 4),
+                "confidence_upper": round(upper, 4),
+                "estimated_segment_travel_time_min": round(estimated_travel_time_min, 3),
+                "predicted_segment_travel_time_min": round(predicted_travel_time_min, 3),
+            }
+        )
+
+    runtime["heatmap_rows"] = heatmap_rows
+    runtime["model_metrics"] = prediction_engine.metrics
+    status = {
+        **simulation_engine.get_status(),
+        "model": prediction_engine.model_name,
+    }
+    return heatmap_rows, runtime["model_metrics"], status
 
 
 def minutes_to_time(value: int) -> time:
@@ -37,23 +111,11 @@ def minutes_to_time(value: int) -> time:
     return time(hour=hours, minute=mins)
 
 
-default_backend_url = normalize_api_base(os.getenv("BACKEND_URL", "https://backend-api-production-0277.up.railway.app"))
-API_BASE = normalize_api_base(st.sidebar.text_input("Backend URL", default_backend_url))
-
 st.set_page_config(page_title="Lagos Traffic Platform", layout="wide")
-st.title("Lagos Real-Time Traffic Simulation & Predictive Congestion Platform")
+st.title("Lagos Traffic Demo (Streamlit-Only Mode)")
+st.caption("This demo runs simulation, prediction, and routing in-process without external backend APIs.")
 
 st_autorefresh(interval=3000, key="live_refresh")
-
-
-def fetch_json(path: str):
-    try:
-        response = requests.get(f"{API_BASE}{path}", timeout=15)
-        response.raise_for_status()
-        return response.json()
-    except Exception as exc:
-        st.error(f"Failed to fetch {path}: {exc}")
-        return None
 
 
 def congestion_to_color(value: float) -> list[int]:
@@ -63,17 +125,15 @@ def congestion_to_color(value: float) -> list[int]:
     return [red, green, 50, 180]
 
 
-live = fetch_json("/live/heatmap")
-metrics = fetch_json("/prediction/metrics")
-status = (live or {}).get("status", {})
+runtime = get_runtime_state()
+items, metrics, status = run_step(runtime)
 
 col1, col2, col3 = st.columns(3)
-if live and live.get("items"):
-    items = live["items"]
+if items:
     mean_congestion = sum(x["congestion_index"] for x in items) / len(items)
     col1.metric("Active Segments", len(items))
     col2.metric("Avg Congestion", f"{mean_congestion:.3f}")
-    col3.metric("Sim Tick", live.get("status", {}).get("tick", 0))
+    col3.metric("Sim Tick", status.get("tick", 0))
 
     map_rows = []
     for item in items:
@@ -117,18 +177,19 @@ if live and live.get("items"):
         )
 
     view_state = pdk.ViewState(latitude=6.5244, longitude=3.3792, zoom=10)
+    tooltip_config: Any = {
+        "text": (
+            "Segment ID: {segment_id}\n"
+            "Avg Speed: {avg_speed} km/h\n"
+            "Vehicle Count: {vehicle_count}\n"
+            "Congestion Index: {congestion}"
+        )
+    }
     st.pydeck_chart(
         pdk.Deck(
             layers=layers,
             initial_view_state=view_state,
-            tooltip={
-                "text": (
-                    "Segment ID: {segment_id}\n"
-                    "Avg Speed: {avg_speed} km/h\n"
-                    "Vehicle Count: {vehicle_count}\n"
-                    "Congestion Index: {congestion}"
-                )
-            },
+            tooltip=tooltip_config,
         )
     )
 
@@ -153,26 +214,30 @@ with ctrl_col4:
 control_btn_col1, control_btn_col2, control_btn_col3, control_btn_col4 = st.columns(4)
 with control_btn_col1:
     if st.button("Start"):
-        post_json("/route/pause", {"paused": False})
-        post_json(
-            "/route/controls",
-            {
-                "day_of_week": int(day_choice),
-                "time_of_day_minutes": int(time_choice),
-                "scenario": scenario_choice,
-                "speed_multiplier": float(speed_choice),
-            },
+        runtime["simulation_engine"].set_paused(False)
+        runtime["simulation_engine"].set_temporal_controls(
+            day_of_week=int(day_choice),
+            time_of_day_minutes=int(time_choice),
+            scenario=scenario_choice,
+            speed_multiplier=float(speed_choice),
         )
+        st.rerun()
 with control_btn_col2:
     if st.button("Pause"):
-        post_json("/route/pause", {"paused": True})
+        runtime["simulation_engine"].set_paused(True)
+        st.rerun()
 with control_btn_col3:
     if st.button("Reset"):
-        post_json("/route/reset")
+        runtime["simulation_engine"].reset()
+        runtime["prediction_engine"] = PredictionEngine()
+        runtime["routing_engine"] = RoutingEngine(runtime["simulation_engine"], runtime["prediction_engine"])
+        st.session_state["route_geometry"] = []
+        st.rerun()
 with control_btn_col4:
     demand = st.slider("Demand Multiplier", min_value=0.2, max_value=2.5, value=float(status.get("demand_multiplier", 1.0)), step=0.1)
     if st.button("Apply Demand"):
-        post_json("/route/scenario", {"multiplier": demand})
+        runtime["simulation_engine"].set_demand_scenario(demand)
+        st.rerun()
 
 st.caption(
     f"Simulation status — tick: {status.get('tick', 0)}, paused: {status.get('paused', False)}, model: {status.get('model', 'n/a')}"
@@ -186,10 +251,15 @@ with incident_col2:
     incident_severity = st.slider("Incident Severity", 0.0, 1.0, 0.5, 0.1)
 with incident_col3:
     if st.button("Inject Incident"):
-        post_json(
-            "/route/incident",
-            {"segment_id": int(incident_segment), "severity": incident_severity, "duration_ticks": 180},
+        ok = runtime["simulation_engine"].inject_incident(
+            segment_id=int(incident_segment),
+            severity=float(incident_severity),
+            duration_ticks=180,
         )
+        if not ok:
+            st.error("Invalid segment id for incident injection.")
+        else:
+            st.rerun()
 
 st.subheader("Route Query")
 default_origin = "6.52,3.36"
@@ -201,17 +271,14 @@ if st.button("Analyze"):
     try:
         o_lat, o_lon = [float(v.strip()) for v in origin_raw.split(",")]
         d_lat, d_lon = [float(v.strip()) for v in destination_raw.split(",")]
-        payload = {
-            "origin": {"lat": o_lat, "lon": o_lon},
-            "destination": {"lat": d_lat, "lon": d_lon},
-        }
-        response = requests.post(f"{API_BASE}/route/analyze", json=payload, timeout=10)
-        if response.status_code == 404:
+        route_result = runtime["routing_engine"].analyze_route(
+            origin=(o_lat, o_lon),
+            destination=(d_lat, d_lon),
+        )
+        if not route_result.get("route_geometry"):
             st.error("Route not found for the selected coordinates.")
             st.session_state["route_geometry"] = []
         else:
-            response.raise_for_status()
-            route_result = response.json()
             st.session_state["route_geometry"] = route_result.get("route_geometry", [])
             rt_col1, rt_col2 = st.columns(2)
             rt_col1.metric(
@@ -229,16 +296,32 @@ if st.button("Analyze"):
 st.subheader("Predictive Analytics Panel")
 segment_id = st.number_input("Segment ID", min_value=1, max_value=5000, value=1)
 if st.button("Load Segment Prediction"):
-    pred = fetch_json(f"/prediction/segment/{segment_id}")
-    if pred:
+    engine = runtime["simulation_engine"]
+    predictor = runtime["prediction_engine"]
+    sid = int(segment_id)
+    if sid not in engine.segment_by_id:
+        st.error("segment not found")
+    else:
+        segment = engine.segment_by_id[sid]
+        state = engine.live_state[sid]
+        history = list(engine.congestion_history[sid])
+        features = build_feature_row(
+            segment_id=sid,
+            timestamp=datetime.fromisoformat(state["timestamp"]),
+            congestion_history=history,
+            capacity=segment.capacity,
+            vehicle_count=state["vehicle_count"],
+            incident_flag=state["incident_flag"],
+        )
+        pred, low, high = predictor.predict(features)
         st.write(
             {
-                "predicted_congestion": pred["predicted_congestion"],
-                "confidence_interval": [pred["confidence_lower"], pred["confidence_upper"]],
-                "model": pred["model"],
+                "predicted_congestion": round(pred, 4),
+                "confidence_interval": [round(low, 4), round(high, 4)],
+                "model": predictor.model_name,
             }
         )
-        hist = pred.get("historical_congestion", [])
+        hist = predictor.get_segment_history(sid)
         if hist:
             st.line_chart(pd.DataFrame({"historical_congestion": hist}))
 

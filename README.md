@@ -30,6 +30,22 @@ cd frontend
 - http://127.0.0.1:8501
 - In sidebar, ensure `Backend URL` is `http://127.0.0.1:8000`
 
+## Streamlit-Only Demo Mode
+
+The frontend can run without a deployed backend API by executing simulation, prediction, and routing in-process.
+
+```bash
+cd frontend
+..\.venv\Scripts\python.exe -m pip install -r requirements.txt
+..\.venv\Scripts\python.exe -m streamlit run streamlit_app.py --server.address 127.0.0.1 --server.port 8501
+```
+
+Optional tuning variables for demo mode:
+
+- `SIM_NUM_SEGMENTS` (default `700`)
+- `SIM_TOTAL_VEHICLES` (default `70000`)
+- `SIM_TICK_INTERVAL_SECONDS` (default `1`)
+
 ## Architecture
 
 Road Network (Synthetic OSM-style)
@@ -113,21 +129,3 @@ set PYTHONPATH=%cd%
 - The current implementation is synthetic and does not ingest live traffic feeds.
 - Redis and Postgres are optional for development; cache falls back to in-memory when Redis is unavailable.
 - Model retraining is periodic based on simulation ticks.
-
-## Oracle Cloud Deployment Pack
-
-Production-oriented OCI artifacts are available in the deployment pack:
-
-- Services and sizing: `deploy/oci/services-and-sizing.md`
-- Step-by-step runbook: `deploy/oci/runbook.md`
-- Environment variable matrix: `deploy/oci/env-matrix.md`
-- Rollback plan: `deploy/oci/rollback-plan.md`
-
-Supporting files:
-
-- OCI compose file: `deploy/oci/docker-compose.oci.yml`
-- Backend env template: `deploy/oci/env/backend.env.example`
-- Frontend env template: `deploy/oci/env/frontend.env.example`
-- VM bootstrap script: `deploy/oci/scripts/bootstrap_vm.sh`
-- Deploy script: `deploy/oci/scripts/deploy_stack.sh`
-- Smoke test script: `deploy/oci/scripts/smoke_test.sh`
